@@ -1,0 +1,13 @@
+#　機械学習の際に自分が設定したい数値を記述 
+optimizer:
+  learning_rate: 0.001
+  momentum: 0.9
+
+train:
+  epoch: 5
+
+
+# 結果を可視化する際に必要になる変数 
+mlflow:
+  experiment_name: "my_experiment2"
+  run_name: "my_run"

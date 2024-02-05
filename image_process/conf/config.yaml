@@ -1,0 +1,15 @@
+#　機械学習の際に自分が設定したい数値を記述 
+optimizer:
+  learning_rate: 0.0005
+  momentum: 0.9
+
+train:
+  batch_size: 32
+  epoch: 10
+
+
+# 結果を可視化する際に必要になる変数 
+mlflow:
+  experiment_name: "image_process"
+  run_name: "first_run"
+  registered_model_name: "image_process_model"

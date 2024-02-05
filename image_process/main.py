@@ -88,6 +88,9 @@ def main(cfg: DictConfig) -> None:
     batch_size = cfg.train.batch_size
     num_epochs = cfg.train.epoch
 
+
+    print("loading data.............")
+
     ### 画像データの読み込み (ラベルは数字)
     image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),data_transforms[x])
                     for x in ['train', 'val']}
@@ -112,10 +115,13 @@ def main(cfg: DictConfig) -> None:
     num_ftrs = model.fc.in_features    
     model.fc = nn.Linear(num_ftrs, len(class_names))
 
-    state_dict_uri = "file:///mnt/vmlqnap02/home/inoue/deeplearning/image_process/mlruns/878525502675615922/2f922bda78af4dcbaf28506f0830c322/artifacts/model"
+
+    ## モデルをloadする場合
+    state_dict_uri = "file:///mnt/vmlqnap02/home/inoue/deeplearning/image_process/mlruns/878525502675615922/133c8ebecf36481984797bab2609b5db/artifacts/model_state_dict"
     state_dict = mlflow.pytorch.load_state_dict(state_dict_uri)
     model.load_state_dict(state_dict)
     model = model.to(device)
+
 
     # パラメータの更新を行うかどうかを設定
     # for param in model.parameters():        
@@ -142,7 +148,7 @@ def main(cfg: DictConfig) -> None:
     fl_handler.setLevel(logging.DEBUG)
     # インスタンス化したハンドラをそれぞれログ太郎に渡す
     log.addHandler(fl_handler)
-    log.info(f"output_dir: {output_dir}")
+    log.info(f"output_dir: {output_dir} \n")
    
 
     # ネットワークの構造を表示
@@ -155,24 +161,31 @@ def main(cfg: DictConfig) -> None:
     with open_dict(cfg):
         cfg.mlflow["tracking_uri"] = "file://" + hydra.utils.get_original_cwd() + "/mlruns"
     mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
-    mlflow.set_experiment(cfg.mlflow.experiment_name)
+    experiment_name = cfg.mlflow.experiment_name
+    # experiment_id = "image_process_bee_vs_ant"
 
-    # パラメータを保存(辞書式を分解して保持)
-    for k in cfg.keys():
-        if k != "mlflow":
-            for v in cfg[k].items():
-                mlflow.log_param(v[0],v[1])
+    mlflow.set_experiment(experiment_name=experiment_name)
 
- 
-     
+    experiment_id = mlflow.get_experiment_by_name(experiment_name).experiment_id
+    log.info(f"experiment_id: {experiment_id}")
 
 
-    ############### 学習処理 ################
-
-    with mlflow.start_run(run_name=cfg.mlflow.run_name) as run:        
+    ############### 学習処理 ################    
+    with mlflow.start_run(run_name=cfg.mlflow.run_name):        
 
         best_acc = 0.0
         # best_model_wts = copy.deepcopy(model.state_dict()) 
+
+
+        # パラメータを保存(辞書式を分解して保持)
+        for k in cfg.keys():
+            if k != "mlflow":
+                for v in cfg[k].items():
+                    mlflow.log_param(v[0],v[1])
+
+        mlflow.set_tag("release.version", "abc")        
+       
+
 
         for epoch in range(num_epochs):                                
                     
@@ -194,13 +207,9 @@ def main(cfg: DictConfig) -> None:
                 labels = labels.to(device)
 
                 optimizer.zero_grad()
-
                 outputs = model(inputs)
-
-                loss = criterion(outputs,labels)
-                
-                loss.backward()
-                
+                loss = criterion(outputs,labels)            
+                loss.backward()                
                 optimizer.step()
 
                 _, predicted = torch.max(outputs, 1)
@@ -210,7 +219,7 @@ def main(cfg: DictConfig) -> None:
                 train_acc += (predicted == labels).sum()
 
             optim_scheduler.step()
-            
+        
             # 検証フェース
             model.eval()
             with torch.no_grad():
@@ -245,7 +254,8 @@ def main(cfg: DictConfig) -> None:
 
             if val_acc > best_acc:
                 best_acc = val_acc
-                best_model_wts = copy.deepcopy(model.state_dict())    
+                ## 新しい別のオブジェクトを作成する (代入だと一方の変更が影響を与える)
+                best_model_state_dict  = copy.deepcopy(model.state_dict())    
 
         time_elapsed = time.time() - since
 
@@ -254,57 +264,29 @@ def main(cfg: DictConfig) -> None:
 
 
         # ベストモデルの重みをロードします
-        model.load_state_dict(best_model_wts)
+        model.load_state_dict(best_model_state_dict)
         #  失敗した例を画像として保存
         num_images = 4
         visualize_model(device,output_dir,model,dataloaders,class_names,num_images)
+        mlflow.log_artifact(f"{output_dir}/output.png")
 
 
+        # mlflowにモデルを保存                            
+        # 保存先のパス
+        state_dict_path = "model_state_dict"
+        mlflow.pytorch.log_state_dict(best_model_state_dict, state_dict_path)
+        log.info(f"state_dict_uri: {mlflow.get_artifact_uri(state_dict_path)} \n ")
 
+        ## モデルをmlflow
+        # model_path = "model"
+        # signature = infer_signature(inputs.numpy(),model(inputs).detach().numpy())
+        # mlflow.pytorch.log_model(model, model_path, signature=signature,registered_model_name=cfg.mlflow.registered_model_name)
 
-
-
-
-
-        # モデルを保存
-        # model.pthが作成される (torchの標準)
-        # torch.save(model.state_dict(), output_dir + '/model.pth')
-
-        # mlflowにモデルを保存
-        signature = infer_signature(inputs.numpy(),model(inputs).detach().numpy())
-        artifact_path = "model"
-        model_info = mlflow.pytorch.log_model(model, artifact_path, signature=signature,registered_model_name=cfg.mlflow.registered_model_name)
-
-        # mlflow.log_state_dict(model.state_dict(),artifact_path=artifact_path)
-
-        state_dict = model.state_dict()
-        mlflow.pytorch.log_state_dict(state_dict, artifact_path)
-        log.info(f"state_dict_uri: {mlflow.get_artifact_uri(artifact_path)} \n ")
-        # log.info()
-        log.info(f"model_info: {model_info}")
-        log.info(f"model_path: {model_info.model_uri}")
-        log.info(f"run_id: {run.info.run_id}")
-
-        # log.info(f"state_dict_uri: {mlflow.get_artifact_uri(artifact_path)}")
-
-        client = mlflow.tracking.MlflowClient()
-        experiment_id = "878525502675615922"
-        best_run = client.search_runs(
-            experiment_id, order_by=["metrics.val_loss"], max_results=1
-        )[0]
-        log.info(f"best_run: {best_run}")
-
-        mlflow.set_tag("mlflow.source.type", "LOCAL")
-        
-
-        # mlflow.pyfunc.save_model(output_dir + '/model',loader_module="model")
-        # mlflow.pyfunc.save_model('model',loader_module="model",python_model=model,input_example=inputs)
-
-        # mlflow.log_artifact(f"{output_dir}/output.png")
-
-        # logファイルをmlflowに保存        
+        # 実行logファイルをmlflowに保存        
         mlflow.log_artifact(f"{output_dir}/exec.log")
 
+
+    mlflow.end_run()
 
 
 
