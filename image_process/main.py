@@ -63,6 +63,7 @@ def visualize_model(device,output_dir,model,dataloaders,class_names,num_images):
 @hydra.main(config_path="conf",config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     
+    print("starting")
 
     ############### データ処理 ################
 
